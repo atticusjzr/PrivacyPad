@@ -34,6 +34,7 @@ Personal data is stored as **chips** in the editor — they display the real val
 ## Features
 
 - **Zero-backend** — single HTML file, works offline
+- **Multi-provider** — works with Anthropic (Claude) and OpenAI (GPT)
 - **Custom entities** — define any people, companies, or objects with custom fields
 - **Live placeholder preview** — see exactly what AI receives before sending
 - **Resizable panels** — drag the dividers to adjust layout
@@ -46,7 +47,7 @@ Personal data is stored as **chips** in the editor — they display the real val
 
 1. Download [`PrivacyPad.html`](./PrivacyPad.html)
 2. Open it in any modern browser
-3. Click **⚙ Settings** and enter your [Anthropic API key](https://console.anthropic.com/)
+3. Click **⚙ Settings**, select your provider (Anthropic or OpenAI), and enter your API key
 4. Add entities and fields on the left panel
 5. Write your document and insert field chips via **＋ Insert field**
 6. Click **Analyze Document** — AI receives only placeholder codes
@@ -80,6 +81,17 @@ The `data-placeholder` attribute is set once when the chip is created and **neve
 
 ---
 
+## Supported Providers
+
+| Provider | Models |
+|---|---|
+| Anthropic | Claude Haiku 4.5, Claude Sonnet 4.6, Claude Opus 4.7 |
+| OpenAI | GPT-4o mini, GPT-4o, GPT-4 Turbo |
+
+API keys are stored in `localStorage` and sent only to the respective provider's API endpoint. Both providers are called directly from the browser — no proxy, no middleware.
+
+---
+
 ## Use Cases
 
 | Field | Example |
@@ -88,7 +100,7 @@ The `data-placeholder` attribute is set once when the chip is created and **neve
 | Healthcare | Medical note analysis without patient identifiers |
 | HR | Performance review with employee names as placeholders |
 | Journalism | Source-protected interview analysis |
-| Law enforcement | Case document AI assistance (original use case) |
+| Law enforcement | Case document AI assistance |
 | Finance | Transaction analysis with account holders anonymized |
 
 ---
@@ -98,17 +110,17 @@ The `data-placeholder` attribute is set once when the chip is created and **neve
 | Data type | Where it lives | Leaves the browser? |
 |---|---|---|
 | Entity field values (names, IDs…) | Browser RAM only | ✗ Never |
-| Document text with placeholders | Sent to Anthropic API | ✓ (no personal data) |
-| API key | `localStorage` | Only to `api.anthropic.com` |
+| Document text with placeholders | Sent to AI provider API | ✓ (no personal data) |
+| API keys | `localStorage` | Only to respective provider |
 
-Even if Anthropic's servers were fully compromised, the attacker would only see placeholder codes — there is no way to reverse `{{PersonA-Name}}` back to a real identity without the local data.
+Even if an AI provider's servers were fully compromised, the attacker would only see placeholder codes — there is no way to reverse `{{PersonA-Name}}` back to a real identity without the local data.
 
 ---
 
 ## Requirements
 
 - Any modern browser (Chrome, Firefox, Safari, Edge)
-- An [Anthropic API key](https://console.anthropic.com/) (Claude Haiku is fast and cheap)
+- An API key from [Anthropic](https://console.anthropic.com/) or [OpenAI](https://platform.openai.com/)
 
 ---
 
