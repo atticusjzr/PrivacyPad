@@ -1,0 +1,1068 @@
+<!DOCTYPE html>
+<!--
+  PrivacyPad
+  ────────────────────────────────────────────────────────────────────────────
+  Core concept: personal / sensitive data is defined in "entities" on the left.
+  When inserted into the document, each field becomes a "chip" — a styled tag
+  that DISPLAYS the real value but carries a fixed data-placeholder attribute
+  (e.g. {{PersonA-FullName}}) that never changes.
+
+  When the document is sent to AI:
+    → text nodes  : sent as-is
+    → chip nodes  : replaced with data-placeholder  ← real value never leaves
+
+  The AI receives only placeholder codes. Real values never leave the browser.
+
+  Setup: click ⚙ Settings and enter your Anthropic API key.
+  ────────────────────────────────────────────────────────────────────────────
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PrivacyPad</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  font-size: 14px;
+  background: #f1f5f9;
+  color: #1e293b;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ── Header ── */
+header {
+  background: #0f172a;
+  color: #f8fafc;
+  height: 46px;
+  padding: 0 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+  border-bottom: 1px solid #1e293b;
+}
+header h1 { font-size: 14px; font-weight: 600; letter-spacing: -0.01em; }
+header .tagline { font-size: 11px; color: #64748b; }
+header .spacer { flex: 1; }
+.settings-btn {
+  background: none;
+  border: 1px solid #334155;
+  color: #94a3b8;
+  padding: 4px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.settings-btn:hover { border-color: #6366f1; color: #a5b4fc; }
+
+/* ── Layout ── */
+.workspace {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  background: white;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.resizer {
+  width: 8px;
+  background: #e2e8f0;
+  cursor: col-resize;
+  flex-shrink: 0;
+  transition: background 0.15s;
+  position: relative;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.resizer::after {
+  content: '';
+  display: block;
+  width: 2px;
+  height: 32px;
+  border-radius: 2px;
+  background: #94a3b8;
+  transition: background 0.15s, height 0.15s;
+}
+.resizer:hover::after, .resizer.dragging::after {
+  background: #6366f1;
+  height: 48px;
+}
+.resizer:hover, .resizer.dragging { background: #ede9fe; }
+
+#panel-entities { width: 260px; min-width: 140px; max-width: 480px; border-right: none; }
+#panel-editor   { flex: 1; min-width: 200px; border-right: none; border-left: none; }
+#panel-ai       { width: 300px; min-width: 160px; max-width: 520px; border-left: none; }
+
+.panel-head {
+  padding: 8px 14px;
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.panel-head .note {
+  margin-left: auto;
+  font-weight: 400;
+  font-size: 10px;
+  color: #94a3b8;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.panel-body { flex: 1; overflow-y: auto; padding: 10px; }
+
+/* ── Entity list ── */
+.entity {
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  margin-bottom: 8px;
+  overflow: hidden;
+}
+.entity-head {
+  padding: 7px 10px;
+  background: #f8fafc;
+  border-bottom: 1px solid #f1f5f9;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.entity-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.entity-name-input {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 600;
+  border: none;
+  background: transparent;
+  outline: none;
+  color: #1e293b;
+  min-width: 0;
+}
+.icon-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #cbd5e1;
+  font-size: 13px;
+  line-height: 1;
+  padding: 1px 3px;
+}
+.icon-btn:hover { color: #ef4444; }
+
+.field-row {
+  display: flex;
+  align-items: center;
+  padding: 4px 10px;
+  gap: 6px;
+  border-bottom: 1px solid #f8fafc;
+}
+.field-ph {
+  font-size: 10px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  color: #94a3b8;
+  background: #f1f5f9;
+  padding: 1px 5px;
+  border-radius: 3px;
+  flex-shrink: 0;
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.field-val {
+  flex: 1;
+  font-size: 12px;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: #0f172a;
+  min-width: 0;
+}
+.field-val::placeholder { color: #cbd5e1; }
+
+.add-field-btn {
+  display: block;
+  width: 100%;
+  padding: 5px 10px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 11px;
+  color: #6366f1;
+  text-align: left;
+}
+.add-field-btn:hover { background: #f5f3ff; }
+
+.add-entity-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  background: white;
+  border: 1.5px dashed #cbd5e1;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  color: #64748b;
+}
+.add-entity-btn:hover { border-color: #6366f1; color: #6366f1; }
+
+/* ── Editor ── */
+.editor-toolbar {
+  padding: 6px 12px;
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.insert-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 11px;
+  background: #6366f1;
+  color: white;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+}
+.insert-btn:hover { background: #4f46e5; }
+.preview-btn {
+  margin-left: auto;
+  padding: 4px 10px;
+  border: 1px solid #e2e8f0;
+  background: white;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 11px;
+  color: #64748b;
+}
+.preview-btn:hover { border-color: #6366f1; color: #6366f1; }
+.preview-btn.active { border-color: #6366f1; color: #6366f1; background: #f5f3ff; }
+
+#editor {
+  flex: 1;
+  padding: 20px 24px;
+  outline: none;
+  line-height: 1.85;
+  font-size: 14px;
+  overflow-y: auto;
+  background: white;
+}
+#editor:empty::before {
+  content: attr(data-placeholder);
+  color: #94a3b8;
+  pointer-events: none;
+}
+
+.h-resizer {
+  display: none;
+  height: 8px;
+  background: #e2e8f0;
+  cursor: row-resize;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+}
+.h-resizer.show { display: flex; }
+.h-resizer::after {
+  content: '';
+  display: block;
+  height: 2px;
+  width: 32px;
+  border-radius: 2px;
+  background: #94a3b8;
+  transition: background 0.15s, width 0.15s;
+}
+.h-resizer:hover::after, .h-resizer.dragging::after { background: #6366f1; width: 48px; }
+.h-resizer:hover, .h-resizer.dragging { background: #ede9fe; }
+
+#privacy-preview {
+  display: none;
+  padding: 14px 20px;
+  background: #fffbeb;
+  border-top: 1px solid #fde68a;
+  font-size: 12px;
+  line-height: 1.8;
+  color: #78350f;
+  height: 160px;
+  overflow-y: auto;
+  flex-shrink: 0;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+#privacy-preview.show { display: block; }
+.preview-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: #92400e;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 6px;
+  font-family: -apple-system, sans-serif;
+}
+
+/* ── Insert dropdown ── */
+#insert-dd {
+  position: fixed;
+  z-index: 1000;
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 7px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.10);
+  min-width: 220px;
+  padding: 4px 0;
+  display: none;
+}
+#insert-dd.open { display: block; }
+.dd-section { border-bottom: 1px solid #f1f5f9; padding: 2px 0; }
+.dd-section:last-child { border-bottom: none; }
+.dd-title {
+  padding: 4px 12px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.dd-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 16px;
+  cursor: pointer;
+  font-size: 12px;
+  color: #334155;
+}
+.dd-item:hover { background: #f5f3ff; color: #4338ca; }
+.dd-ph {
+  font-size: 10px;
+  font-family: monospace;
+  color: #94a3b8;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── AI panel ── */
+.ai-system {
+  padding: 8px 10px;
+  border-bottom: none;
+  flex-shrink: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.ai-system textarea {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  border: 1px solid #e2e8f0;
+  border-radius: 5px;
+  padding: 6px 8px;
+  font-size: 11px;
+  line-height: 1.5;
+  outline: none;
+  resize: none;
+  color: #475569;
+  background: #f8fafc;
+  font-family: inherit;
+}
+.ai-system textarea:focus { border-color: #6366f1; }
+
+.ai-messages { flex: 1; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+
+.msg { padding: 10px 12px; border-radius: 6px; font-size: 12px; line-height: 1.65; }
+.msg-user { background: #4f46e5; color: white; margin-left: 16px; }
+.msg-ai { background: #f1f5f9; color: #1e293b; margin-right: 16px; white-space: pre-wrap; }
+.msg-label { font-size: 10px; font-weight: 700; opacity: 0.7; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.05em; }
+
+.empty-state { text-align: center; color: #94a3b8; font-size: 12px; padding: 24px 16px; }
+.empty-icon { font-size: 28px; margin-bottom: 8px; }
+
+.ai-footer {
+  padding: 8px 10px;
+  border-top: 1px solid #e2e8f0;
+  flex-shrink: 0;
+}
+.privacy-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #dcfce7;
+  color: #166534;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 10px;
+  margin-bottom: 6px;
+}
+.send-btn {
+  width: 100%;
+  padding: 8px;
+  background: #6366f1;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+}
+.send-btn:hover:not(:disabled) { background: #4f46e5; }
+.send-btn:disabled { background: #cbd5e1; cursor: not-allowed; }
+
+/* ── Settings modal ── */
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.45);
+  z-index: 2000;
+  display: none;
+  align-items: center;
+  justify-content: center;
+}
+.overlay.open { display: flex; }
+.modal {
+  background: white;
+  border-radius: 10px;
+  padding: 22px 24px;
+  width: 400px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.15);
+}
+.modal h2 { font-size: 15px; font-weight: 700; margin-bottom: 18px; }
+.modal label { display: block; font-size: 11px; color: #64748b; font-weight: 600; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.05em; }
+.modal input, .modal select {
+  width: 100%;
+  border: 1px solid #e2e8f0;
+  border-radius: 5px;
+  padding: 8px 10px;
+  font-size: 13px;
+  outline: none;
+  margin-bottom: 14px;
+  font-family: inherit;
+}
+.modal input:focus, .modal select:focus { border-color: #6366f1; }
+.modal-note { font-size: 11px; color: #94a3b8; margin-top: -10px; margin-bottom: 14px; }
+.modal-foot { display: flex; gap: 8px; justify-content: flex-end; }
+.btn-primary { padding: 7px 18px; background: #6366f1; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 13px; font-weight: 500; }
+.btn-primary:hover { background: #4f46e5; }
+.btn-ghost { padding: 7px 18px; background: white; color: #64748b; border: 1px solid #e2e8f0; border-radius: 5px; cursor: pointer; font-size: 13px; }
+
+/* ── Misc ── */
+@keyframes pulse { 0%,100%{opacity:.4} 50%{opacity:1} }
+.thinking::after { content: '…'; animation: pulse 1.2s infinite; }
+</style>
+</head>
+<body>
+
+<header>
+  <span>🔒</span>
+  <h1>PrivacyPad</h1>
+  <span class="tagline">Sensitive data stays local — AI receives placeholder codes only</span>
+  <div class="spacer"></div>
+  <button class="settings-btn" onclick="openSettings()">⚙ Settings</button>
+</header>
+
+<div class="workspace">
+
+  <!-- ── Left: Entity panel ── -->
+  <div class="panel" id="panel-entities">
+    <div class="panel-head">
+      🧩 Entities
+      <span class="note">Real values live here</span>
+    </div>
+    <div class="panel-body" id="entity-list"></div>
+  </div>
+
+  <div class="resizer" id="resizer-left"></div>
+
+  <!-- ── Center: Editor ── -->
+  <div class="panel" id="panel-editor">
+    <div class="editor-toolbar">
+      <button class="insert-btn" id="insert-btn" onclick="toggleDropdown(event)">＋ Insert field ▾</button>
+      <button class="preview-btn" id="preview-btn" onclick="togglePreview()">👁 What AI sees</button>
+    </div>
+    <div id="editor" contenteditable="true" spellcheck="false"
+      data-placeholder="Write your document here. Use 'Insert field' to embed entity data as privacy-safe placeholders…"
+    ></div>
+    <div class="h-resizer" id="h-resizer"></div>
+    <div id="privacy-preview">
+      <div class="preview-label">🔒 Sent to AI — no personal data</div>
+      <div id="preview-text"></div>
+    </div>
+  </div>
+
+  <div class="resizer" id="resizer-right"></div>
+
+  <!-- ── Right: AI panel ── -->
+  <div class="panel" id="panel-ai">
+    <div class="panel-head">🤖 AI Assistant</div>
+    <div class="ai-system" id="ai-system">
+      <textarea id="sys-prompt" rows="3"
+        placeholder="System prompt (optional)…">You are a helpful assistant. The user's document uses placeholder codes like {{EntityName-FieldName}} in place of sensitive personal data. Treat them as references to real people/entities and respond naturally.</textarea>
+    </div>
+    <div class="h-resizer show" id="h-resizer-ai"></div>
+    <div class="ai-messages" id="messages">
+      <div class="empty-state">
+        <div class="empty-icon">🔒</div>
+        Write in the editor, then send to AI.<br>
+        Real values are <strong>never</strong> transmitted.
+      </div>
+    </div>
+    <div class="ai-footer">
+      <div class="privacy-badge">✓ Privacy Protected</div>
+      <button class="send-btn" id="send-btn" onclick="sendToAI()">Analyze Document ▶</button>
+    </div>
+  </div>
+
+</div>
+
+<!-- Insert dropdown -->
+<div id="insert-dd"></div>
+
+<!-- Settings modal -->
+<div class="overlay" id="settings-overlay">
+  <div class="modal">
+    <h2>⚙ Settings</h2>
+    <label>Anthropic API Key</label>
+    <input type="password" id="s-key" placeholder="sk-ant-…" />
+    <p class="modal-note">Stored in localStorage, never sent anywhere except api.anthropic.com</p>
+    <label>Model</label>
+    <select id="s-model">
+      <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5 (fast, cheap)</option>
+      <option value="claude-sonnet-4-6">Claude Sonnet 4.6 (balanced)</option>
+      <option value="claude-opus-4-7">Claude Opus 4.7 (most capable)</option>
+    </select>
+    <div class="modal-foot">
+      <button class="btn-ghost" onclick="closeSettings()">Cancel</button>
+      <button class="btn-primary" onclick="saveSettings()">Save</button>
+    </div>
+  </div>
+</div>
+
+<script>
+'use strict';
+
+// ── Palette ───────────────────────────────────────────────────────────────────
+const COLORS = [
+  { bg: '#dbeafe', text: '#1e40af', border: '#93c5fd' },
+  { bg: '#dcfce7', text: '#166534', border: '#86efac' },
+  { bg: '#ede9fe', text: '#5b21b6', border: '#c4b5fd' },
+  { bg: '#ffedd5', text: '#9a3412', border: '#fdba74' },
+  { bg: '#fce7f3', text: '#9d174d', border: '#f9a8d4' },
+  { bg: '#cffafe', text: '#164e63', border: '#67e8f9' },
+];
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let entities = [];      // [{ id, name, colorIdx, fields: [{id, name, value}] }]
+let previewOn = false;
+let savedRange = null;  // cursor position saved before dropdown opens
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+const $ = id => document.getElementById(id);
+
+function esc(s) {
+  return String(s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function uid() { return Date.now() + Math.random(); }
+
+function placeholder(entity, field) {
+  return `{{${entity.name}-${field.name}}}`;
+}
+
+// ── Entity management ─────────────────────────────────────────────────────────
+function addEntity() {
+  entities.push({
+    id: uid(),
+    name: `Entity ${entities.length + 1}`,
+    colorIdx: entities.length % COLORS.length,
+    fields: [{ id: uid(), name: 'Name', value: '' }],
+  });
+  render();
+}
+
+function removeEntity(id) {
+  entities = entities.filter(e => e.id !== id);
+  render(); refreshChips();
+}
+
+function addField(entityId) {
+  const name = prompt('Field name:');
+  if (!name?.trim()) return;
+  const e = entities.find(e => e.id === entityId);
+  if (e) { e.fields.push({ id: uid(), name: name.trim(), value: '' }); render(); }
+}
+
+function removeField(entityId, fieldId) {
+  const e = entities.find(e => e.id === entityId);
+  if (e) { e.fields = e.fields.filter(f => f.id !== fieldId); render(); }
+}
+
+function onEntityName(id, val) {
+  const e = entities.find(e => e.id === id);
+  if (e) { e.name = val; refreshChips(); }
+}
+
+function onFieldValue(entityId, fieldId, val) {
+  const e = entities.find(e => e.id === entityId);
+  const f = e?.fields.find(f => f.id === fieldId);
+  if (!f) return;
+  f.value = val;
+  // Update every matching chip in the editor
+  document.querySelectorAll(`[data-chip][data-eid="${entityId}"][data-fid="${fieldId}"]`)
+    .forEach(chip => {
+      chip.querySelector('[data-val]').textContent = val || chip.dataset.ph;
+    });
+}
+
+// Recalculate all placeholder texts after rename
+function refreshChips() {
+  document.querySelectorAll('[data-chip]').forEach(chip => {
+    const e = entities.find(e => e.id == chip.dataset.eid);
+    const f = e?.fields.find(f => f.id == chip.dataset.fid);
+    if (!e || !f) return;
+    const ph = placeholder(e, f);
+    chip.dataset.ph = ph;
+    const valEl = chip.querySelector('[data-val]');
+    if (valEl && !f.value) valEl.textContent = ph;
+  });
+  if (previewOn) updatePreview();
+}
+
+// ── Render entity panel ───────────────────────────────────────────────────────
+function render() {
+  const list = $('entity-list');
+  list.innerHTML = '';
+
+  entities.forEach(entity => {
+    const c = COLORS[entity.colorIdx];
+    const div = document.createElement('div');
+    div.className = 'entity';
+    div.innerHTML = `
+      <div class="entity-head" style="border-left:3px solid ${c.border}">
+        <span class="entity-dot" style="background:${c.border}"></span>
+        <input class="entity-name-input" value="${esc(entity.name)}"
+          oninput="onEntityName(${entity.id}, this.value)" />
+        <button class="icon-btn" onclick="removeEntity(${entity.id})" title="Remove entity">✕</button>
+      </div>
+      ${entity.fields.map(f => `
+        <div class="field-row">
+          <span class="field-ph" title="${esc(placeholder(entity, f))}">${esc(placeholder(entity, f))}</span>
+          <input class="field-val" value="${esc(f.value)}" placeholder="${esc(f.name)}…"
+            oninput="onFieldValue(${entity.id}, ${f.id}, this.value)" />
+          <button class="icon-btn" onclick="removeField(${entity.id}, ${f.id})" title="Remove field">✕</button>
+        </div>
+      `).join('')}
+      <button class="add-field-btn" onclick="addField(${entity.id})">＋ Add field</button>
+    `;
+    list.appendChild(div);
+  });
+
+  const btn = document.createElement('button');
+  btn.className = 'add-entity-btn';
+  btn.innerHTML = '＋ Add Entity';
+  btn.onclick = addEntity;
+  list.appendChild(btn);
+}
+
+// ── Chip creation ─────────────────────────────────────────────────────────────
+function makeChip(entity, field) {
+  const c = COLORS[entity.colorIdx];
+  const ph = placeholder(entity, field);
+
+  // Outer wrapper — carries the placeholder as a data attribute (never changes)
+  const outer = document.createElement('span');
+  outer.dataset.chip = '1';
+  outer.dataset.eid  = entity.id;   // entity id
+  outer.dataset.fid  = field.id;    // field id
+  outer.dataset.ph   = ph;          // placeholder code  ← THIS is what AI sees
+  outer.contentEditable = 'false';
+  outer.style.display = 'inline-block';
+
+  // Inner label — shows real value (or placeholder if empty)
+  const inner = document.createElement('span');
+  inner.dataset.val = '1';
+  inner.style.cssText = `
+    display:inline-block;
+    background:${c.bg};color:${c.text};
+    border:1px solid ${c.border};border-radius:4px;
+    padding:1px 7px;font-size:12px;font-weight:500;
+    user-select:none;cursor:default;
+  `;
+  inner.textContent = field.value || ph;
+  outer.appendChild(inner);
+  return outer;
+}
+
+// ── Dropdown ──────────────────────────────────────────────────────────────────
+function toggleDropdown(e) {
+  e.stopPropagation();
+
+  // Save cursor before we lose focus
+  const sel = window.getSelection();
+  if (sel?.rangeCount) savedRange = sel.getRangeAt(0).cloneRange();
+
+  const dd = $('insert-dd');
+  if (dd.classList.contains('open')) { dd.classList.remove('open'); return; }
+
+  dd.innerHTML = '';
+  if (!entities.length) {
+    dd.innerHTML = '<div style="padding:12px;font-size:12px;color:#94a3b8;">Add an entity first →</div>';
+  } else {
+    entities.forEach(entity => {
+      const c = COLORS[entity.colorIdx];
+      const sec = document.createElement('div');
+      sec.className = 'dd-section';
+      const title = document.createElement('div');
+      title.className = 'dd-title';
+      title.style.color = c.text;
+      title.textContent = `● ${entity.name}`;
+      sec.appendChild(title);
+      entity.fields.forEach(field => {
+        const item = document.createElement('div');
+        item.className = 'dd-item';
+        item.innerHTML = `<span>${esc(field.name)}</span><span class="dd-ph">${esc(placeholder(entity, field))}</span>`;
+        item.onclick = () => insertChip(entity, field);
+        sec.appendChild(item);
+      });
+      dd.appendChild(sec);
+    });
+  }
+
+  const r = e.currentTarget.getBoundingClientRect();
+  dd.style.top  = (r.bottom + 4) + 'px';
+  dd.style.left = r.left + 'px';
+  dd.classList.add('open');
+}
+
+document.addEventListener('click', () => $('insert-dd').classList.remove('open'));
+
+function insertChip(entity, field) {
+  $('insert-dd').classList.remove('open');
+  const editor = $('editor');
+  editor.focus();
+
+  const sel = window.getSelection();
+  let range;
+  if (savedRange) {
+    range = savedRange;
+    sel.removeAllRanges();
+    sel.addRange(range);
+  } else if (sel?.rangeCount) {
+    range = sel.getRangeAt(0);
+  } else {
+    range = document.createRange();
+    range.selectNodeContents(editor);
+    range.collapse(false);
+  }
+
+  range.deleteContents();
+  const chip = makeChip(entity, field);
+  range.insertNode(chip);
+  range.setStartAfter(chip);
+  range.collapse(true);
+  sel.removeAllRanges();
+  sel.addRange(range);
+  savedRange = null;
+
+  if (previewOn) updatePreview();
+}
+
+// ── Privacy core ──────────────────────────────────────────────────────────────
+/**
+ * getEditorTextForAI()
+ *
+ * Walk the editor DOM. For every node:
+ *   • Text node  →  use textContent  (regular typed text)
+ *   • Chip node  →  use dataset.ph   ← THE PRIVACY GUARANTEE
+ *
+ * Real field values (dataset.val) are NEVER read here.
+ * This is the text that gets sent to the AI API.
+ */
+function getEditorTextForAI() {
+  const editor = $('editor');
+  let out = '';
+
+  function walk(node) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      out += node.textContent;
+    } else if (node instanceof HTMLElement) {
+      if (node.dataset.chip) {
+        out += node.dataset.ph;       // ← placeholder only, never real value
+      } else if (node.tagName === 'BR') {
+        out += '\n';
+      } else {
+        node.childNodes.forEach(walk);
+        if (['DIV','P'].includes(node.tagName)) out += '\n';
+      }
+    }
+  }
+
+  editor.childNodes.forEach(walk);
+  return out.replace(/\n{3,}/g, '\n\n').trim();
+}
+
+// ── Preview ───────────────────────────────────────────────────────────────────
+function togglePreview() {
+  previewOn = !previewOn;
+  const preview = $('privacy-preview');
+  const btn = $('preview-btn');
+  const hRz = $('h-resizer');
+  if (previewOn) {
+    updatePreview();
+    preview.classList.add('show');
+    hRz.classList.add('show');
+    btn.classList.add('active');
+  } else {
+    preview.classList.remove('show');
+    hRz.classList.remove('show');
+    btn.classList.remove('active');
+  }
+}
+
+function updatePreview() {
+  $('preview-text').textContent = getEditorTextForAI() || '(empty)';
+}
+
+$('editor').addEventListener('input', () => { if (previewOn) updatePreview(); });
+
+// ── AI call ───────────────────────────────────────────────────────────────────
+async function sendToAI() {
+  const apiKey = localStorage.getItem('pai_key') || '';
+  if (!apiKey) {
+    openSettings();
+    alert('Enter your Anthropic API key in Settings first.');
+    return;
+  }
+
+  const docText = getEditorTextForAI();
+  if (!docText) { alert('Write something in the editor first.'); return; }
+
+  const model     = localStorage.getItem('pai_model') || 'claude-haiku-4-5-20251001';
+  const sysPrompt = $('sys-prompt').value.trim();
+  const msgs      = $('messages');
+  const btn       = $('send-btn');
+
+  btn.disabled = true;
+  btn.textContent = 'Analyzing…';
+
+  // Clear placeholder if first message
+  if (msgs.querySelector('.empty-state')) msgs.innerHTML = '';
+
+  // User bubble — shows what was actually sent (placeholder version)
+  const userBubble = document.createElement('div');
+  userBubble.className = 'msg msg-user';
+  userBubble.innerHTML = `<div class="msg-label">Sent to AI (placeholders only)</div>${esc(docText)}`;
+  msgs.appendChild(userBubble);
+
+  // AI bubble
+  const aiBubble = document.createElement('div');
+  aiBubble.className = 'msg msg-ai';
+  aiBubble.innerHTML = `<div class="msg-label">AI Response</div><span class="thinking">Thinking</span>`;
+  msgs.appendChild(aiBubble);
+  msgs.scrollTop = msgs.scrollHeight;
+
+  try {
+    const body = {
+      model,
+      max_tokens: 1024,
+      messages: [{ role: 'user', content: docText }],
+    };
+    if (sysPrompt) body.system = sysPrompt;
+
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+        'anthropic-dangerous-direct-browser-access': 'true',
+      },
+      body: JSON.stringify(body),
+    });
+
+    const data = await res.json();
+    const text = data.content?.[0]?.text
+      ?? (data.error ? `Error: ${data.error.message}` : JSON.stringify(data));
+
+    aiBubble.innerHTML = `<div class="msg-label">AI Response</div>${esc(text)}`;
+  } catch (err) {
+    aiBubble.innerHTML = `<div class="msg-label">Error</div>${esc(String(err))}`;
+  }
+
+  btn.disabled = false;
+  btn.textContent = 'Analyze Document ▶';
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
+// ── Settings ──────────────────────────────────────────────────────────────────
+function openSettings() {
+  $('s-key').value = localStorage.getItem('pai_key') || '';
+  $('s-model').value = localStorage.getItem('pai_model') || 'claude-haiku-4-5-20251001';
+  $('settings-overlay').classList.add('open');
+}
+function closeSettings() { $('settings-overlay').classList.remove('open'); }
+function saveSettings() {
+  localStorage.setItem('pai_key',   $('s-key').value.trim());
+  localStorage.setItem('pai_model', $('s-model').value);
+  closeSettings();
+}
+
+// Close modal on overlay click
+$('settings-overlay').addEventListener('click', e => {
+  if (e.target === $('settings-overlay')) closeSettings();
+});
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+// Seed a starter entity so the user can see the pattern right away
+entities.push({
+  id: 1,
+  name: 'Person A',
+  colorIdx: 0,
+  fields: [
+    { id: 10, name: 'Full Name', value: '' },
+    { id: 11, name: 'ID Number', value: '' },
+    { id: 12, name: 'Address',   value: '' },
+  ],
+});
+entities.push({
+  id: 2,
+  name: 'Person B',
+  colorIdx: 1,
+  fields: [
+    { id: 20, name: 'Full Name', value: '' },
+    { id: 21, name: 'Phone',     value: '' },
+  ],
+});
+render();
+
+// ── Panel resizing ────────────────────────────────────────────────────────────
+(function () {
+  function initResizer(resizerId, panelId, side) {
+    // side: 'left' means dragging changes left panel width
+    //       'right' means dragging changes right panel width
+    const rz    = $(resizerId);
+    const panel = $(panelId);
+    let startX, startW;
+
+    rz.addEventListener('mousedown', e => {
+      e.preventDefault();
+      startX = e.clientX;
+      startW = panel.getBoundingClientRect().width;
+      rz.classList.add('dragging');
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+
+      function onMove(e) {
+        const delta = e.clientX - startX;
+        const newW  = side === 'left' ? startW + delta : startW - delta;
+        const min   = parseInt(getComputedStyle(panel).minWidth) || 140;
+        const max   = parseInt(getComputedStyle(panel).maxWidth) || 600;
+        panel.style.width = Math.min(max, Math.max(min, newW)) + 'px';
+      }
+
+      function onUp() {
+        rz.classList.remove('dragging');
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+      }
+
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+  }
+
+  initResizer('resizer-left',  'panel-entities', 'left');
+  initResizer('resizer-right', 'panel-ai',       'right');
+
+  // Horizontal resizer between editor and preview
+  const hRz      = $('h-resizer');
+  const preview  = $('privacy-preview');
+  let hStartY, hStartH;
+
+  // Horizontal resizer between AI system prompt and messages
+  const hRzAi    = $('h-resizer-ai');
+  const aiSystem = $('ai-system');
+  let aiStartY, aiStartH;
+
+  hRzAi.addEventListener('mousedown', e => {
+    e.preventDefault();
+    aiStartY = e.clientY;
+    aiStartH = aiSystem.getBoundingClientRect().height;
+    hRzAi.classList.add('dragging');
+    document.body.style.cursor = 'row-resize';
+    document.body.style.userSelect = 'none';
+
+    function onMove(e) {
+      const newH = Math.min(300, Math.max(40, aiStartH + (e.clientY - aiStartY)));
+      aiSystem.style.height = newH + 'px';
+    }
+    function onUp() {
+      hRzAi.classList.remove('dragging');
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    }
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+
+  hRz.addEventListener('mousedown', e => {
+    e.preventDefault();
+    hStartY = e.clientY;
+    hStartH = preview.getBoundingClientRect().height;
+    hRz.classList.add('dragging');
+    document.body.style.cursor = 'row-resize';
+    document.body.style.userSelect = 'none';
+
+    function onMove(e) {
+      const delta = hStartY - e.clientY;  // drag up = bigger preview
+      const newH  = Math.min(500, Math.max(60, hStartH + delta));
+      preview.style.height = newH + 'px';
+    }
+    function onUp() {
+      hRz.classList.remove('dragging');
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    }
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+})();
+</script>
+</body>
+</html>
