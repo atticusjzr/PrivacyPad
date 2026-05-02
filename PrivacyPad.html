@@ -550,15 +550,16 @@ header .spacer { flex: 1; }
 <div class="overlay" id="settings-overlay">
   <div class="modal">
     <h2>⚙ Settings</h2>
-    <label>Anthropic API Key</label>
-    <input type="password" id="s-key" placeholder="sk-ant-…" />
-    <p class="modal-note">Stored in localStorage, never sent anywhere except api.anthropic.com</p>
-    <label>Model</label>
-    <select id="s-model">
-      <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5 (fast, cheap)</option>
-      <option value="claude-sonnet-4-6">Claude Sonnet 4.6 (balanced)</option>
-      <option value="claude-opus-4-7">Claude Opus 4.7 (most capable)</option>
+    <label>Provider</label>
+    <select id="s-provider" onchange="onProviderChange()">
+      <option value="anthropic">Anthropic (Claude)</option>
+      <option value="openai">OpenAI (GPT)</option>
     </select>
+    <label id="s-key-label">API Key</label>
+    <input type="password" id="s-key" placeholder="sk-ant-…" />
+    <p class="modal-note" id="s-key-note">Stored in localStorage, never sent anywhere except the provider's API.</p>
+    <label>Model</label>
+    <select id="s-model"></select>
     <div class="modal-foot">
       <button class="btn-ghost" onclick="closeSettings()">Cancel</button>
       <button class="btn-primary" onclick="saveSettings()">Save</button>
@@ -856,49 +857,33 @@ function updatePreview() {
 $('editor').addEventListener('input', () => { if (previewOn) updatePreview(); });
 
 // ── AI call ───────────────────────────────────────────────────────────────────
-async function sendToAI() {
-  const apiKey = localStorage.getItem('pai_key') || '';
-  if (!apiKey) {
-    openSettings();
-    alert('Enter your Anthropic API key in Settings first.');
-    return;
-  }
+const PROVIDERS = {
+  anthropic: {
+    label: 'Anthropic (Claude)',
+    keyPlaceholder: 'sk-ant-…',
+    models: [
+      { value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5 (fast, cheap)' },
+      { value: 'claude-sonnet-4-6',         label: 'Claude Sonnet 4.6 (balanced)' },
+      { value: 'claude-opus-4-7',           label: 'Claude Opus 4.7 (most capable)' },
+    ],
+    defaultModel: 'claude-haiku-4-5-20251001',
+  },
+  openai: {
+    label: 'OpenAI (GPT)',
+    keyPlaceholder: 'sk-…',
+    models: [
+      { value: 'gpt-4o-mini', label: 'GPT-4o mini (fast, cheap)' },
+      { value: 'gpt-4o',      label: 'GPT-4o (balanced)' },
+      { value: 'gpt-4-turbo', label: 'GPT-4 Turbo (powerful)' },
+    ],
+    defaultModel: 'gpt-4o-mini',
+  },
+};
 
-  const docText = getEditorTextForAI();
-  if (!docText) { alert('Write something in the editor first.'); return; }
-
-  const model     = localStorage.getItem('pai_model') || 'claude-haiku-4-5-20251001';
-  const sysPrompt = $('sys-prompt').value.trim();
-  const msgs      = $('messages');
-  const btn       = $('send-btn');
-
-  btn.disabled = true;
-  btn.textContent = 'Analyzing…';
-
-  // Clear placeholder if first message
-  if (msgs.querySelector('.empty-state')) msgs.innerHTML = '';
-
-  // User bubble — shows what was actually sent (placeholder version)
-  const userBubble = document.createElement('div');
-  userBubble.className = 'msg msg-user';
-  userBubble.innerHTML = `<div class="msg-label">Sent to AI (placeholders only)</div>${esc(docText)}`;
-  msgs.appendChild(userBubble);
-
-  // AI bubble
-  const aiBubble = document.createElement('div');
-  aiBubble.className = 'msg msg-ai';
-  aiBubble.innerHTML = `<div class="msg-label">AI Response</div><span class="thinking">Thinking</span>`;
-  msgs.appendChild(aiBubble);
-  msgs.scrollTop = msgs.scrollHeight;
-
-  try {
-    const body = {
-      model,
-      max_tokens: 1024,
-      messages: [{ role: 'user', content: docText }],
-    };
+async function callAI(provider, apiKey, model, sysPrompt, docText) {
+  if (provider === 'anthropic') {
+    const body = { model, max_tokens: 1024, messages: [{ role: 'user', content: docText }] };
     if (sysPrompt) body.system = sysPrompt;
-
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -909,11 +894,59 @@ async function sendToAI() {
       },
       body: JSON.stringify(body),
     });
-
     const data = await res.json();
-    const text = data.content?.[0]?.text
-      ?? (data.error ? `Error: ${data.error.message}` : JSON.stringify(data));
+    return data.content?.[0]?.text ?? (data.error ? `Error: ${data.error.message}` : JSON.stringify(data));
+  }
 
+  if (provider === 'openai') {
+    const messages = [];
+    if (sysPrompt) messages.push({ role: 'system', content: sysPrompt });
+    messages.push({ role: 'user', content: docText });
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model, max_tokens: 1024, messages }),
+    });
+    const data = await res.json();
+    return data.choices?.[0]?.message?.content ?? (data.error ? `Error: ${data.error.message}` : JSON.stringify(data));
+  }
+}
+
+async function sendToAI() {
+  const provider = localStorage.getItem('pai_provider') || 'anthropic';
+  const apiKey   = localStorage.getItem(`pai_key_${provider}`) || '';
+  if (!apiKey) {
+    openSettings();
+    alert('Enter your API key in Settings first.');
+    return;
+  }
+
+  const docText = getEditorTextForAI();
+  if (!docText) { alert('Write something in the editor first.'); return; }
+
+  const model     = localStorage.getItem('pai_model') || PROVIDERS[provider].defaultModel;
+  const sysPrompt = $('sys-prompt').value.trim();
+  const msgs      = $('messages');
+  const btn       = $('send-btn');
+
+  btn.disabled = true;
+  btn.textContent = 'Analyzing…';
+
+  if (msgs.querySelector('.empty-state')) msgs.innerHTML = '';
+
+  const userBubble = document.createElement('div');
+  userBubble.className = 'msg msg-user';
+  userBubble.innerHTML = `<div class="msg-label">Sent to AI (placeholders only)</div>${esc(docText)}`;
+  msgs.appendChild(userBubble);
+
+  const aiBubble = document.createElement('div');
+  aiBubble.className = 'msg msg-ai';
+  aiBubble.innerHTML = `<div class="msg-label">AI Response</div><span class="thinking">Thinking</span>`;
+  msgs.appendChild(aiBubble);
+  msgs.scrollTop = msgs.scrollHeight;
+
+  try {
+    const text = await callAI(provider, apiKey, model, sysPrompt, docText);
     aiBubble.innerHTML = `<div class="msg-label">AI Response</div>${esc(text)}`;
   } catch (err) {
     aiBubble.innerHTML = `<div class="msg-label">Error</div>${esc(String(err))}`;
@@ -925,14 +958,27 @@ async function sendToAI() {
 }
 
 // ── Settings ──────────────────────────────────────────────────────────────────
+function onProviderChange() {
+  const provider = $('s-provider').value;
+  const cfg = PROVIDERS[provider];
+  $('s-key').placeholder = cfg.keyPlaceholder;
+  $('s-key').value = localStorage.getItem(`pai_key_${provider}`) || '';
+  const modelSel = $('s-model');
+  modelSel.innerHTML = cfg.models.map(m => `<option value="${m.value}">${m.label}</option>`).join('');
+  modelSel.value = localStorage.getItem('pai_model') || cfg.defaultModel;
+}
+
 function openSettings() {
-  $('s-key').value = localStorage.getItem('pai_key') || '';
-  $('s-model').value = localStorage.getItem('pai_model') || 'claude-haiku-4-5-20251001';
+  const provider = localStorage.getItem('pai_provider') || 'anthropic';
+  $('s-provider').value = provider;
+  onProviderChange();
   $('settings-overlay').classList.add('open');
 }
 function closeSettings() { $('settings-overlay').classList.remove('open'); }
 function saveSettings() {
-  localStorage.setItem('pai_key',   $('s-key').value.trim());
+  const provider = $('s-provider').value;
+  localStorage.setItem('pai_provider', provider);
+  localStorage.setItem(`pai_key_${provider}`, $('s-key').value.trim());
   localStorage.setItem('pai_model', $('s-model').value);
   closeSettings();
 }
