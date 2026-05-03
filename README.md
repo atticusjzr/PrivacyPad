@@ -25,7 +25,7 @@ What you see in the editor:          What AI actually receives:
         Real values in RAM                  Placeholders only
 ```
 
-Personal data is stored as **chips** in the editor — they display the real value on screen, but carry a fixed `data-placeholder` attribute that never changes. When sending to AI, the editor walks the DOM and reads `data-placeholder` instead of the actual content.
+Personal data is stored as **chips** in the editor — they display the real value on screen, but carry a fixed `data-ph` attribute that never changes. When sending to AI, the editor walks the DOM and reads `data-ph` instead of the actual content.
 
 **Real values never leave the browser. Ever.**
 
@@ -66,7 +66,7 @@ function getEditorTextForAI() {
     if (node.nodeType === Node.TEXT_NODE) {
       text += node.textContent;           // regular text: sent as-is
     } else if (node.dataset?.chip) {
-      text += node.dataset.placeholder;  // chip: send {{placeholder}}, NOT real value
+      text += node.dataset.ph;  // chip: send {{placeholder}}, NOT real value
     }
   });
   return text;
@@ -75,7 +75,7 @@ function getEditorTextForAI() {
 
 Each chip in the editor has two parts:
 - **Visual layer** — displays the real value (e.g. "John Smith")
-- **Data layer** — `data-placeholder="{{PersonA-Name}}"` — this is what AI sees
+- **Data layer** — `data-ph="{{PersonA-Name}}"` — this is what AI sees
 
 The `data-placeholder` attribute is set once when the chip is created and **never updated**, regardless of what the user types into the chip.
 
